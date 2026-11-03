@@ -1,5 +1,10 @@
 seed: 42
 
+dataset:
+  name: german_credit            # Statlog German Credit Data (UCI id 144)
+  source: https://archive.ics.uci.edu/dataset/144/statlog+german+credit+data
+  file: data/raw/german.data
+
 paths:
   raw: data/raw
   processed: data/processed
