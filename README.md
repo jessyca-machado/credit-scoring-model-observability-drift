@@ -51,6 +51,7 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 ```bash
 make install    # uv sync - cria .venv e instala dependências do uv.lock
 make data       # baixa o German Credit (UCI) para data/raw
+make preprocess # trata os dados e gera train/test (data/processed) e reference (data/reference)
 make train      # treina o modelo
 make simulate   # gera lotes com Data/Concept Drift
 make detect     # calcula métricas de drift

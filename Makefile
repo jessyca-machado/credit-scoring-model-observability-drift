@@ -1,4 +1,4 @@
-.PHONY: install lock data train simulate detect causal serve up down test lint
+.PHONY: install lock data preprocess train simulate detect causal serve up down test lint
 
 install:
 	uv sync
@@ -8,6 +8,9 @@ lock:
 
 data:
 	uv run python -m credit_scoring.data.download
+
+preprocess:
+	uv run python -m credit_scoring.data.preprocess
 
 train:
 	uv run python -m credit_scoring.model.train
