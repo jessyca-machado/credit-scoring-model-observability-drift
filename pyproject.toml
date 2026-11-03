@@ -43,3 +43,14 @@ pythonpath = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# D: docstrings (pydocstyle) | ANN: type hints | UP/B/I: boas práticas e imports
+select = ["E", "F", "W", "I", "UP", "B", "D", "ANN"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ANN"]
+"**/__init__.py" = ["D104"]
