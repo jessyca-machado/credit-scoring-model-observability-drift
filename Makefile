@@ -1,4 +1,4 @@
-.PHONY: install lock data preprocess train simulate detect causal serve up down test lint
+.PHONY: install lock data preprocess train mlflow-ui simulate detect causal serve up down test lint
 
 install:
 	uv sync
@@ -14,6 +14,9 @@ preprocess:
 
 train:
 	uv run python -m credit_scoring.model.train
+
+mlflow-ui:
+	uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000
 
 simulate:
 	uv run python -m credit_scoring.drift.simulate

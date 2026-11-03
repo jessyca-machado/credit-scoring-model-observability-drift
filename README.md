@@ -52,7 +52,8 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 make install    # uv sync - cria .venv e instala dependências do uv.lock
 make data       # baixa o German Credit (UCI) para data/raw
 make preprocess # trata os dados e gera train/test (data/processed) e reference (data/reference)
-make train      # treina o modelo
+make train      # treina o XGBoost (busca de hiperparâmetros + threshold por custo) e salva em models/
+make mlflow-ui  # abre o MLflow em http://localhost:5000 para comparar execuções
 make simulate   # gera lotes com Data/Concept Drift
 make detect     # calcula métricas de drift
 make up         # sobe api, prometheus (9090), grafana (3000) e mlflow (5000)
