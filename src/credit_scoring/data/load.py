@@ -131,6 +131,33 @@ PERSONAL_STATUS_MAP: Final[dict[str, tuple[str, str]]] = {
 SENSITIVE_COLUMNS: Final[list[str]] = ["sex", "marital_status", "foreign_worker", "age"]
 
 
+def category_dtype(column: str) -> pd.CategoricalDtype:
+    """Retorna o dtype categórico com o domínio completo de uma coluna.
+
+    O domínio vem do dicionário de dados da UCI, e não dos valores observados.
+    Assim, categorias válidas mas ausentes na amostra (ex.: `purpose = vacation`)
+    continuam conhecidas, e lotes de produção mantêm o mesmo dtype do treino.
+
+    Args:
+        column: Nome de uma coluna categórica decodificada (inclui `sex` e
+            `marital_status`).
+
+    Returns:
+        `CategoricalDtype` não ordenado com todas as categorias válidas.
+
+    Raises:
+        KeyError: Se `column` não for uma coluna categórica conhecida.
+    """
+    if column in CATEGORY_MAPS:
+        categories = list(CATEGORY_MAPS[column].values())
+    elif column in ("sex", "marital_status"):
+        idx = 0 if column == "sex" else 1
+        categories = list(dict.fromkeys(v[idx] for v in PERSONAL_STATUS_MAP.values()))
+    else:
+        raise KeyError(f"Coluna categórica desconhecida: {column}")
+    return pd.CategoricalDtype(categories=categories, ordered=False)
+
+
 def load_raw(path: Path | str = DEFAULT_PATH) -> pd.DataFrame:
     """Lê o arquivo original do German Credit sem nenhuma transformação.
 
@@ -167,11 +194,11 @@ def decode(df: pd.DataFrame) -> pd.DataFrame:
     """
     out = df.copy()
     for col, mapping in CATEGORY_MAPS.items():
-        out[col] = out[col].map(mapping).astype("category")
+        out[col] = out[col].map(mapping).astype(category_dtype(col))
 
     status = out.pop("personal_status").map(PERSONAL_STATUS_MAP)
-    out["sex"] = status.str[0].astype("category")
-    out["marital_status"] = status.str[1].astype("category")
+    out["sex"] = status.str[0].astype(category_dtype("sex"))
+    out["marital_status"] = status.str[1].astype(category_dtype("marital_status"))
 
     # Original: 1 = bom, 2 = mau -> default: 0 = bom, 1 = mau
     out[TARGET] = (out.pop("class") == 2).astype("int8")
