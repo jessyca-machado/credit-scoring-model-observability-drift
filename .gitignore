@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Dados e artefatos (não versionar dados pessoais - LGPD)
+data/**/*
+!data/**/.gitkeep
+models/**/*
+!models/.gitkeep
+mlruns/
+mlartifacts/
+
+# Ambiente
+.env
+.DS_Store

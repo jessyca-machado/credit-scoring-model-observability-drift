@@ -1,0 +1,15 @@
+groups:
+  - name: credit-scoring-drift
+    rules:
+      - alert: FeatureDriftCritical
+        expr: max by (feature) (feature_psi) > 0.25
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "PSI crítico na feature {{ $labels.feature }}"
+      - alert: ModelPerformanceDegraded
+        expr: model_auc < 0.70
+        for: 1m
+        labels: { severity: critical }
+        annotations:
+          summary: "AUC do modelo abaixo do mínimo aceitável"

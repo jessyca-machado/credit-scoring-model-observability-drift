@@ -1,0 +1,27 @@
+seed: 42
+
+paths:
+  raw: data/raw
+  processed: data/processed
+  reference: data/reference      # baseline (dados de treino) para comparação de drift
+  production: data/production    # lotes simulados ao longo do tempo
+  models: models
+
+model:
+  target: default
+  test_size: 0.2
+
+simulation:
+  n_batches: 12                  # ex.: 12 semanas/meses de produção
+  data_drift_start: 4            # lote em que começa o data drift
+  concept_drift_start: 8         # lote em que começa o concept drift
+
+drift:
+  psi_warning: 0.1
+  psi_critical: 0.25
+  ks_pvalue: 0.05
+  auc_min: 0.70
+
+serving:
+  host: 0.0.0.0
+  port: 8000
