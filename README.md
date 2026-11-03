@@ -1,6 +1,18 @@
 # credit-scoring-model-observability-drift
 Quarto tech challenge para o curso pós-tech da FIAP de machine learning engineering - construção de um modelo de classificação simples, com contratos de qualidade de dados, simulação de um cenário de degradação (Data Drift e Concept Drift), uso de ferramentas de observabilidade e doc sob as regras de governança e privacidade (LGPD).
 
+## Dataset
+
+[Statlog German Credit Data](https://archive.ics.uci.edu/dataset/144/statlog+german+credit+data) (UCI, licença CC BY 4.0):
+1.000 solicitantes de crédito, 20 atributos (7 numéricos, 13 categóricos) e alvo binário
+(700 bons / 300 maus pagadores). O dado bruto não é versionado; baixe com `make data`
+(integridade validada por SHA-256). A carga decodificada fica em
+`credit_scoring.data.load.load_german_credit()`, com o alvo `default` (1 = mau pagador).
+
+> O dataset original define custo assimétrico: classificar um mau pagador como bom custa 5x mais
+> que o erro inverso. Atributos sensíveis (`sex`, `marital_status`, `foreign_worker`, `age`) são
+> usados apenas para auditoria de viés, não como features.
+
 ## Estrutura do projeto
 
 ```
@@ -38,6 +50,7 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 
 ```bash
 make install    # uv sync - cria .venv e instala dependências do uv.lock
+make data       # baixa o German Credit (UCI) para data/raw
 make train      # treina o modelo
 make simulate   # gera lotes com Data/Concept Drift
 make detect     # calcula métricas de drift
