@@ -67,6 +67,51 @@ age                       in_range(18, 100)               16            0
 <row>                     monthly_installment_consistent  APP-00289     2
 ```
 
+## Ingestão bloqueada pelo contrato
+
+Todo lote de produção passa por [`ingest.py`](../../src/credit_scoring/data/ingest.py):
+
+```
+data/production/incoming/lote.parquet
+        │  INFERENCE_CONTRACT
+        ├── válido   → data/production/accepted/lote.parquet
+        └── inválido → data/production/quarantine/lote.parquet
+                       data/production/quarantine/lote.violations.csv   (exit code 1)
+```
+
+O bloqueio é do **lote inteiro**: nenhuma linha de um lote inválido chega ao modelo, pois erros em parte das linhas costumam indicar falha sistêmica na origem.
+
+### Demonstração
+
+```bash
+make demo-contract
+```
+
+Gera um lote limpo e uma cópia com 9 tipos de erro injetados:
+
+| Erro injetado | Regra que bloqueia |
+|---|---|
+| cliente com 16 anos | `age: in_range(18, 100)` |
+| `credit_amount` nulo | `credit_amount: not_nullable` |
+| `credit_amount` negativo | `credit_amount: greater_than(0)` |
+| `purpose = "crypto"` | `purpose: isin` |
+| ID repetido | `application_id: field_uniqueness` |
+| solicitação duplicada com outro ID | `no_duplicate_records` |
+| parcela ×10 | `monthly_installment_consistent` |
+| `female` + `married/widowed` | `valid_sex_marital_status_pair` |
+| coluna `cpf` | `column_in_schema` |
+
+Resultado:
+
+```
+ACEITO    | batch_ok.parquet        |  50 linhas |  0 violações
+BLOQUEADO | batch_corrupted.parquet |  51 linhas | 14 violações
+```
+
+São 14 violações para 9 erros porque alguns erros disparam mais de uma regra (ex.: `credit_amount` nulo também viola o tipo `int64` e a consistência da parcela).
+
+Para ingerir um lote específico: `make ingest FILE=data/production/incoming/lote.parquet`.
+
 ## Observação sobre "renda não pode ser nula"
 
 O German Credit **não possui coluna de renda**. As informações financeiras do solicitante são `credit_amount`, `installment_rate` (parcela em % da renda disponível), `checking_status` e `savings_status`, todas obrigatórias e com domínio validado. Caso uma fonte de renda seja incorporada, ela deve entrar no contrato como `float64`, não nula e `> 0`.
