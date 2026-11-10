@@ -20,6 +20,7 @@ import pandas as pd
 from credit_scoring.data.download import DEFAULT_PATH
 
 TARGET: Final[str] = "default"
+ID_COLUMN: Final[str] = "application_id"
 
 RAW_COLUMNS: Final[list[str]] = [
     "checking_status",

@@ -29,7 +29,7 @@ def df() -> pd.DataFrame:
 def test_clean_removes_duplicates(df):
     out = clean(df)
     assert len(out) == 2
-    assert out["credit_amount"].dtype == "int16"
+    assert out["credit_amount"].dtype == "int64"
 
 
 def test_clean_fails_on_nulls(df):

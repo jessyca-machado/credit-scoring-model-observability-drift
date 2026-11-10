@@ -30,11 +30,12 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from credit_scoring.config import load_config
-from credit_scoring.data.load import SENSITIVE_COLUMNS, TARGET, load_german_credit
+from credit_scoring.contracts.schemas import TRAINING_CONTRACT, validate
+from credit_scoring.data.load import ID_COLUMN, SENSITIVE_COLUMNS, TARGET, load_german_credit
 
 logger = logging.getLogger(__name__)
 
-ID_COLUMN: Final[str] = "application_id"
+__all__ = ["ID_COLUMN", "FEATURES", "NUMERIC_FEATURES", "CATEGORICAL_FEATURES"]
 
 NUMERIC_FEATURES: Final[list[str]] = [
     "duration_months",
@@ -86,8 +87,11 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     Args:
         df: DataFrame decodificado (saída de `load_german_credit`).
 
+    Inteiros são mantidos em `int64`: reduzir para `int16` (máx. 32.767)
+    estouraria silenciosamente `credit_amount` em cenários de inflação.
+
     Returns:
-        Novo DataFrame sem duplicatas e com inteiros reduzidos (`int16`).
+        Novo DataFrame sem duplicatas.
 
     Raises:
         ValueError: Se houver valores nulos em qualquer coluna.
@@ -99,11 +103,7 @@ def clean(df: pd.DataFrame) -> pd.DataFrame:
     n_dup = int(df.duplicated().sum())
     if n_dup:
         logger.warning("Removendo %d linhas duplicadas", n_dup)
-    out = df.drop_duplicates().reset_index(drop=True)
-
-    int_cols = out.select_dtypes("integer").columns.drop(TARGET, errors="ignore")
-    out[int_cols] = out[int_cols].astype("int16")
-    return out
+    return df.drop_duplicates().reset_index(drop=True)
 
 
 def add_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -157,14 +157,20 @@ def split_xy(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame]:
 def build_dataset() -> pd.DataFrame:
     """Executa o tratamento completo a partir do arquivo bruto.
 
+    O resultado é validado contra `TRAINING_CONTRACT` antes de ser retornado:
+    nenhum dado fora do contrato chega ao treino.
+
     Returns:
         DataFrame com `application_id`, features, colunas sensíveis e alvo.
+
+    Raises:
+        pandera.errors.SchemaErrors: Se o dataset violar o contrato de dados.
     """
     df = load_german_credit()
     df = clean(df)
     df = add_features(df)
     df = add_id(df)
-    return df[[ID_COLUMN, *FEATURES, *SENSITIVE_COLUMNS, TARGET]]
+    return validate(df[[ID_COLUMN, *FEATURES, *SENSITIVE_COLUMNS, TARGET]], TRAINING_CONTRACT)
 
 
 def train_test(df: pd.DataFrame, test_size: float = 0.2, seed: int = 42) -> DatasetSplit:
