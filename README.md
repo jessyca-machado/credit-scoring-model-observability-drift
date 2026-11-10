@@ -27,7 +27,7 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 ├── scripts/                # utilitários e automações
 ├── src/credit_scoring/
 │   ├── data/               # ingestão e pré-processamento
-│   ├── contracts/          # contratos de qualidade de dados (Pandera)
+│   ├── contracts/          # contratos de qualidade de dados (Pandera) - ver docs/governance/data_contract.md
 │   ├── model/              # treino, avaliação e registro (MLflow)
 │   ├── drift/              # simulação e detecção de Data/Concept Drift
 │   ├── causal/             # análise causal (DAG + DoWhy)
@@ -51,7 +51,7 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 ```bash
 make install    # uv sync - cria .venv e instala dependências do uv.lock
 make data       # baixa o German Credit (UCI) para data/raw
-make preprocess # trata os dados e gera train/test (data/processed) e reference (data/reference)
+make preprocess # trata, valida contra o contrato de dados e gera train/test e reference
 make train      # treina o XGBoost (busca de hiperparâmetros + threshold por custo) e salva em models/
 make mlflow-ui  # abre o MLflow em http://localhost:5000 para comparar execuções
 make simulate   # gera lotes com Data/Concept Drift
