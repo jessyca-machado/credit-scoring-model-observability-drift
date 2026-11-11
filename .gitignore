@@ -20,6 +20,7 @@ models/**/*
 mlruns/
 mlflow.db
 reports/
+logs/
 mlartifacts/
 
 # Ambiente
