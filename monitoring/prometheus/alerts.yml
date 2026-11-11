@@ -1,15 +1,72 @@
 groups:
-  - name: credit-scoring-drift
+  - name: pipeline
+    rules:
+      - alert: PipelineStageFailed
+        expr: pipeline_stage_success == 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Etapa '{{ $labels.stage }}' do pipeline falhou na última execução"
+          description: "Consulte os logs: {job=\"credit-scoring-pipeline\", stage=\"{{ $labels.stage }}\"}"
+
+      - alert: IngestionBatchRejected
+        expr: ingestion_batch_accepted == 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Lote {{ $labels.batch }} bloqueado pelo contrato de dados"
+          description: "{{ with printf \"ingestion_batch_violations{batch='%s'}\" $labels.batch | query }}{{ . | first | value }}{{ end }} violações. Relatório em data/production/quarantine/."
+
+      - alert: DriftDetectionStale
+        expr: time() - pipeline_stage_last_success_timestamp_seconds{stage="detect"} > 35 * 24 * 3600
+        labels: { severity: warning }
+        annotations:
+          summary: "Detecção de drift não roda com sucesso há mais de 35 dias"
+
+  - name: drift-and-model
     rules:
       - alert: FeatureDriftCritical
-        expr: max by (feature) (feature_psi) > 0.25
-        for: 1m
-        labels: { severity: critical }
+        expr: feature_psi > 0.25
+        labels: { severity: warning }
         annotations:
-          summary: "PSI crítico na feature {{ $labels.feature }}"
+          summary: "Data drift: PSI {{ $value | printf \"%.2f\" }} na feature {{ $labels.feature }}"
+
+      - alert: PredictionDriftCritical
+        expr: prediction_psi > 0.25
+        labels: { severity: warning }
+        annotations:
+          summary: "Distribuição da PD prevista mudou (PSI {{ $value | printf \"%.2f\" }})"
+
       - alert: ModelPerformanceDegraded
         expr: model_auc < 0.70
+        labels: { severity: critical }
+        annotations:
+          summary: "AUC do modelo em {{ $value | printf \"%.3f\" }}, abaixo do mínimo de 0,70"
+          description: "Possível concept drift. Seguir o runbook docs/runbooks/observability.md."
+
+  - name: serving-and-infra
+    rules:
+      - alert: ApiDown
+        expr: up{job="credit-scoring-api"} == 0
         for: 1m
         labels: { severity: critical }
         annotations:
-          summary: "AUC do modelo abaixo do mínimo aceitável"
+          summary: "API de credit scoring fora do ar"
+
+      - alert: ApiHighLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(api_request_latency_seconds_bucket{endpoint="/predict"}[5m]))) > 1
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "Latência p95 do /predict acima de 1s"
+
+      - alert: ApiContractViolations
+        expr: increase(api_contract_violations_total[5m]) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Requisições bloqueadas pelo contrato de dados na API (regra {{ $labels.check }})"
+
+      - alert: ObservabilityTargetDown
+        expr: up == 0
+        for: 2m
+        labels: { severity: warning }
+        annotations:
+          summary: "Serviço {{ $labels.job }} não responde ao Prometheus"

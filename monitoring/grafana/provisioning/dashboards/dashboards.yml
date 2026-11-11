@@ -3,5 +3,7 @@ providers:
   - name: credit-scoring
     folder: Credit Scoring
     type: file
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
     options:
       path: /var/lib/grafana/dashboards

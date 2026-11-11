@@ -1,30 +1,85 @@
+# Stack de observabilidade do Credit Scoring
+#
+#   api          :8000  modelo em produção (FastAPI) - /predict, /health, /metrics
+#   prometheus   :9090  métricas + regras de alerta
+#   pushgateway  :9091  recebe métricas das etapas batch do pipeline
+#   loki         :3100  armazenamento de logs
+#   alloy        :12345 coleta logs/*.jsonl e envia ao Loki
+#   grafana      :3000  dashboards (métricas + logs)
+#   mlflow       :5000  tracking de experimentos
+
 services:
   api:
     build: .
     ports: ["8000:8000"]
+    environment:
+      - MODELS_DIR=/app/models
+      - LOG_DIR=/app/logs
     volumes:
-      - ./models:/app/models
-      - ./data:/app/data
+      - ./models:/app/models:ro
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v3.16.0
     ports: ["9090:9090"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-lifecycle
     volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+
+  pushgateway:
+    image: prom/pushgateway:v1.11.5
+    ports: ["9091:9091"]
+    command: ["--persistence.file=/data/pushgateway.db"]
+    volumes:
+      - pushgateway-data:/data
+
+  loki:
+    image: grafana/loki:3.6.20
+    ports: ["3100:3100"]
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    volumes:
+      - loki-data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.21.3
+    ports: ["12345:12345"]
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ./logs:/var/log/credit-scoring:ro
+    depends_on: [loki]
 
   grafana:
-    image: grafana/grafana:11.1.0
+    image: grafana/grafana:13.3.1
     ports: ["3000:3000"]
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/credit-scoring.json
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards
-    depends_on: [prometheus]
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on: [prometheus, loki]
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.14.1
+    image: ghcr.io/mlflow/mlflow:v3.17.2
     command: mlflow server --host 0.0.0.0 --port 5000
     ports: ["5000:5000"]
+
+volumes:
+  prometheus-data:
+  pushgateway-data:
+  loki-data:

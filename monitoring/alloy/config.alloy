@@ -1,0 +1,48 @@
+// Coleta os logs JSON do pipeline e da API e envia ao Loki.
+//   logs/pipeline.jsonl -> job="credit-scoring-pipeline"
+//   logs/api.jsonl      -> job="credit-scoring-api"
+
+local.file_match "credit_scoring" {
+  path_targets = [
+    {"__path__" = "/var/log/credit-scoring/pipeline.jsonl", "job" = "credit-scoring-pipeline"},
+    {"__path__" = "/var/log/credit-scoring/api.jsonl", "job" = "credit-scoring-api"},
+  ]
+}
+
+loki.source.file "credit_scoring" {
+  targets    = local.file_match.credit_scoring.targets
+  forward_to = [loki.process.credit_scoring.receiver]
+}
+
+loki.process "credit_scoring" {
+  // Extrai campos do JSON; level, stage e event viram labels (baixa cardinalidade).
+  stage.json {
+    expressions = {
+      level     = "level",
+      stage     = "stage",
+      event     = "event",
+      timestamp = "timestamp",
+    }
+  }
+
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339"
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+      stage = "",
+      event = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
