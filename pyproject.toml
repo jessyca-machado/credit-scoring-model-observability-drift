@@ -5,7 +5,7 @@ description = "Credit Scoring com contratos de dados, detecção de drift, obser
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "pandas>=2.2",
+    "pandas>=2.2,<3",  # evidently 0.7.x ainda não suporta pandas 3
     "numpy>=1.26",
     "scikit-learn>=1.5",
     "pandera>=0.20",
@@ -40,6 +40,12 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# avisos internos de dependências do Evidently (não do código do projeto)
+filterwarnings = [
+    "ignore::DeprecationWarning:evidently.*",
+    "ignore::DeprecationWarning:litestar.*",
+    "ignore::SyntaxWarning",
+]
 
 [tool.ruff]
 line-length = 100
