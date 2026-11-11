@@ -31,14 +31,16 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 │   ├── model/              # treino, avaliação e registro (MLflow)
 │   ├── drift/              # simulação e detecção de Data/Concept Drift
 │   ├── causal/             # análise causal (DAG + DoWhy)
+│   ├── observability/      # logs JSON (Loki) e métricas das etapas (Pushgateway)
 │   └── serving/            # API FastAPI + endpoint /metrics (Prometheus)
 ├── monitoring/
 │   ├── prometheus/         # scrape config e regras de alerta
-│   └── grafana/            # datasources e dashboards provisionados
+│   ├── alloy/              # coleta de logs/*.jsonl -> Loki
+│   └── grafana/            # datasources (Prometheus + Loki) e dashboard provisionado
 ├── docs/
 │   ├── governance/         # LGPD, RIPD, base legal, retenção
 │   ├── model_card/         # Model Card e Data Card
-│   └── runbooks/           # resposta a incidentes de drift
+│   └── runbooks/           # observabilidade e resposta a alertas (observability.md)
 ├── tests/{unit,integration}/
 ├── docker-compose.yml      # api + prometheus + grafana + mlflow
 ├── Dockerfile
@@ -59,6 +61,10 @@ make mlflow-ui  # abre o MLflow em http://localhost:5000 para comparar execuçõ
 make simulate   # gera 12 lotes mensais de produção (jan-dez/2025) com data drift (abr+) e concept drift (ago+)
 make predict    # gera PD, score (0-1000) e decisão para cada lote de produção
 make detect     # Evidently: referência x produção por mês (drift PSI + desempenho) -> reports/
-make up         # sobe api, prometheus (9090), grafana (3000) e mlflow (5000)
+make pipeline   # roda todas as etapas instrumentadas (logs + métricas) com o mesmo RUN_ID
+make serve      # API local: POST /predict, GET /health, GET /metrics
+make up         # sobe api (8000), prometheus (9090), pushgateway (9091), loki, alloy, grafana (3000) e mlflow (5000)
+make traffic    # gera tráfego na API a partir dos lotes de produção
+make observability  # up + pipeline + traffic; dashboard em http://localhost:3000
 make test
 ```
