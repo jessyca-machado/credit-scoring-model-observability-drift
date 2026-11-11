@@ -57,6 +57,7 @@ make ingest FILE=… # ingere um lote: aceito ou quarentena (exit 1)
 make train      # treina o XGBoost (busca de hiperparâmetros + threshold por custo) e salva em models/
 make mlflow-ui  # abre o MLflow em http://localhost:5000 para comparar execuções
 make simulate   # gera 12 lotes mensais de produção (jan-dez/2025) com data drift (abr+) e concept drift (ago+)
+make predict    # gera PD, score (0-1000) e decisão para cada lote de produção
 make detect     # calcula métricas de drift
 make up         # sobe api, prometheus (9090), grafana (3000) e mlflow (5000)
 make test

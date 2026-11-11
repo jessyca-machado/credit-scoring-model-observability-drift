@@ -1,4 +1,4 @@
-.PHONY: install lock data preprocess ingest demo-contract train mlflow-ui simulate detect causal serve up down test lint
+.PHONY: install lock data preprocess ingest demo-contract train mlflow-ui simulate predict detect causal serve up down test lint
 
 install:
 	uv sync
@@ -26,6 +26,9 @@ mlflow-ui:
 
 simulate:
 	uv run python -m credit_scoring.drift.simulate
+
+predict:
+	uv run python -m credit_scoring.model.predict
 
 detect:
 	uv run python -m credit_scoring.drift.detect
