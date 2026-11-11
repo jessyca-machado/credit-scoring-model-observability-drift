@@ -19,6 +19,7 @@ models/**/*
 !models/.gitkeep
 mlruns/
 mlflow.db
+reports/
 mlartifacts/
 
 # Ambiente

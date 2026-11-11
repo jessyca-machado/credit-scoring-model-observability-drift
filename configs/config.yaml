@@ -11,6 +11,7 @@ paths:
   reference: data/reference      # baseline (dados de treino) para comparação de drift
   production: data/production    # lotes simulados ao longo do tempo
   models: models
+  reports: reports                # relatórios Evidently (HTML) e drift_summary.csv
 
 model:
   target: default
@@ -39,9 +40,8 @@ simulation:
 
 drift:
   psi_warning: 0.1
-  psi_critical: 0.25
-  ks_pvalue: 0.05
-  auc_min: 0.70
+  psi_critical: 0.25             # coluna em drift no Evidently (PSI); abaixo disso há ruído amostral
+  auc_min: 0.70                  # abaixo disso o modelo é considerado degradado
 
 serving:
   host: 0.0.0.0
