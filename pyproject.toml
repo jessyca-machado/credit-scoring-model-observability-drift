@@ -45,6 +45,7 @@ filterwarnings = [
     "ignore::DeprecationWarning:evidently.*",
     "ignore::DeprecationWarning:litestar.*",
     "ignore::SyntaxWarning",
+    "ignore:Using `httpx` with `starlette.testclient`",
 ]
 
 [tool.ruff]
