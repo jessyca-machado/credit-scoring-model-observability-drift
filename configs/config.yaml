@@ -26,9 +26,16 @@ mlflow:
   experiment: credit-scoring
 
 simulation:
-  n_batches: 12                  # ex.: 12 semanas/meses de produção
-  data_drift_start: 4            # lote em que começa o data drift
-  concept_drift_start: 8         # lote em que começa o concept drift
+  n_batches: 12                  # 12 meses de produção
+  start_month: "2025-01"
+  batch_size: 300                # solicitações por mês
+  data_drift_start: 3            # índice 0-based: data drift a partir de abr/2025
+  concept_drift_start: 7         # índice 0-based: concept drift a partir de ago/2025
+  monthly_inflation: 0.03        # inflação mensal composta sobre credit_amount
+  extend_duration_prob: 0.4      # fração máx. de clientes que alongam o prazo (+6/+12 meses)
+  profile_weight: 3.0            # peso extra do novo perfil (conta negativa, sem histórico, emprego recente)
+  flip_no_account: 0.5           # prob. máx. de default de bons pagadores sem conta corrente
+  flip_overindebted: 0.5         # prob. máx. de default de bons pagadores com créditos em outras instituições
 
 drift:
   psi_warning: 0.1
