@@ -58,3 +58,18 @@ def test_cli_exit_code(clean_batch, tmp_path):
     bad = write(corrupt(clean_batch), tmp_path / "incoming" / "bad.parquet")
     assert main([str(ok), "--production-dir", str(tmp_path)]) == 0
     assert main([str(bad), "--production-dir", str(tmp_path)]) == 1
+
+
+def test_ingestion_metrics(clean_batch, tmp_path):
+    from prometheus_client import generate_latest
+
+    from credit_scoring.observability.metrics import StageMetrics
+
+    metrics = StageMetrics("ingest")
+    ingest_batch(write(clean_batch, tmp_path / "in" / "ok.parquet"), tmp_path, metrics)
+    ingest_batch(write(corrupt(clean_batch), tmp_path / "in" / "bad.parquet"), tmp_path, metrics)
+    text = generate_latest(metrics.registry).decode()
+    assert 'ingestion_batch_accepted{batch="ok"} 1.0' in text
+    assert 'ingestion_batch_accepted{batch="bad"} 0.0' in text
+    expected = 'ingestion_contract_violations{batch="bad",check="in_range(18, 100)",column="age"}'
+    assert f"{expected} 1.0" in text

@@ -32,6 +32,8 @@ from sklearn.model_selection import train_test_split
 from credit_scoring.config import load_config
 from credit_scoring.contracts.schemas import TRAINING_CONTRACT, validate
 from credit_scoring.data.load import ID_COLUMN, SENSITIVE_COLUMNS, TARGET, load_german_credit
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -213,9 +215,16 @@ def save_split(split: DatasetSplit, processed_dir: Path | str, reference_dir: Pa
 def main() -> None:
     """Gera os datasets tratados conforme `configs/config.yaml`."""
     cfg = load_config()
-    df = build_dataset()
-    split = train_test(df, test_size=cfg["model"]["test_size"], seed=cfg["seed"])
-    save_split(split, cfg["paths"]["processed"], cfg["paths"]["reference"])
+    with track_stage("preprocess") as metrics:
+        df = build_dataset()
+        split = train_test(df, test_size=cfg["model"]["test_size"], seed=cfg["seed"])
+        save_split(split, cfg["paths"]["processed"], cfg["paths"]["reference"])
+        for name, part in (("train", split.train), ("test", split.test)):
+            metrics.set("dataset_rows", len(part), "Linhas por partição", split=name)
+            metrics.set(
+                "dataset_default_rate", float(part[TARGET].mean()),
+                "Taxa de default por partição", split=name,
+            )
     logger.info(
         "Treino: %d linhas (default %.1f%%) | Teste: %d linhas (default %.1f%%)",
         len(split.train),
@@ -226,5 +235,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()

@@ -34,6 +34,8 @@ from credit_scoring.config import load_config
 from credit_scoring.contracts.schemas import INFERENCE_CONTRACT, validate
 from credit_scoring.data.load import ID_COLUMN
 from credit_scoring.data.preprocess import FEATURES
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -163,13 +165,24 @@ def main() -> None:
     """Gera predições para os lotes de produção conforme `configs/config.yaml`."""
     cfg = load_config()
     prod = Path(cfg["paths"]["production"])
-    model = load_model(cfg["paths"]["models"])
-    logger.info("Modelo %s | threshold %.2f", model.version, model.threshold)
-    summary = predict_batches(prod / "accepted", prod / "predictions", model)
+    with track_stage("predict") as metrics:
+        model = load_model(cfg["paths"]["models"])
+        logger.info("Modelo %s | threshold %.2f", model.version, model.threshold)
+        summary = predict_batches(prod / "accepted", prod / "predictions", model)
+        for row in summary.itertuples():
+            metrics.set("prediction_batch_rows", row.n, "Predições geradas", batch=row.batch)
+            metrics.set(
+                "prediction_batch_approval_rate", row.approval_rate,
+                "Taxa de aprovação do lote", batch=row.batch,
+            )
+            metrics.set(
+                "prediction_batch_mean_score", row.mean_score,
+                "Score médio (0-1000) do lote", batch=row.batch,
+            )
     table = summary.round(3).to_string(index=False)
     logger.info("Predições salvas em %s\n%s", prod / "predictions", table)
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()

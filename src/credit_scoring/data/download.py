@@ -15,6 +15,9 @@ import urllib.request
 from pathlib import Path
 from typing import Final
 
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import track_stage
+
 logger = logging.getLogger(__name__)
 
 URL: Final[str] = "https://archive.ics.uci.edu/ml/machine-learning-databases/statlog/german/german.data"
@@ -78,5 +81,7 @@ def download(dest: Path | str = DEFAULT_PATH, force: bool = False) -> Path:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    download()
+    setup_logging()
+    with track_stage("download") as metrics:
+        path = download()
+        metrics.set("dataset_raw_bytes", path.stat().st_size, "Tamanho do arquivo bruto baixado")

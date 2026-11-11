@@ -35,6 +35,8 @@ from credit_scoring.data.load import ID_COLUMN, TARGET
 from credit_scoring.data.preprocess import CATEGORICAL_FEATURES, FEATURES, NUMERIC_FEATURES
 from credit_scoring.model.evaluate import classification_report
 from credit_scoring.model.predict import LoadedModel, load_model, predict
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import StageMetrics, track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +210,76 @@ def classify_status(row: dict[str, Any], drift_cfg: dict[str, Any]) -> str:
     return "ok"
 
 
+STATUS_CODES: dict[str, int] = {"ok": 0, "data_drift": 1, "degraded": 2}
+
+PERFORMANCE_METRICS: dict[str, str] = {
+    "roc_auc": "model_roc_auc",
+    "ks": "model_ks",
+    "recall": "model_recall",
+    "precision": "model_precision",
+    "approval_rate": "model_approval_rate",
+    "expected_cost": "model_expected_cost",
+    "default_rate": "production_default_rate",
+    "mean_default_proba": "model_mean_default_proba",
+}
+
+
+def export_metrics(metrics: StageMetrics, summary: pd.DataFrame) -> None:
+    """Publica os resultados dos testes de drift como métricas Prometheus.
+
+    Duas visões:
+
+    - **histórico** (label `month`): uma série por mês, para os painéis de
+      evolução no Grafana;
+    - **atual** (sem `month`): valores do mês mais recente, usados pelas
+      regras de alerta (`feature_psi`, `prediction_psi`, `model_auc`,
+      `drifted_columns`, `model_health_status`).
+
+    Args:
+        metrics: Registro de métricas da etapa.
+        summary: Saída de `detect`.
+    """
+    psi_cols = [c for c in summary.columns if c.startswith("psi_")]
+    for row in summary.to_dict("records"):
+        month = row["month"]
+        for col in psi_cols:
+            metrics.set(
+                "drift_feature_psi", row[col], "PSI referência x produção por mês",
+                feature=col.removeprefix("psi_"), month=month,
+            )
+        metrics.set(
+            "drift_drifted_columns", row["drifted_columns"],
+            "Colunas com PSI acima do limite crítico", month=month,
+        )
+        metrics.set(
+            "model_health_status_code", STATUS_CODES[row["status"]],
+            "0 = ok, 1 = data drift, 2 = degradado", month=month,
+        )
+        for col, name in PERFORMANCE_METRICS.items():
+            metrics.set(name, row[col], f"{col} do modelo em produção por mês", month=month)
+
+    latest = summary.iloc[-1]
+    for col in psi_cols:
+        feature = col.removeprefix("psi_")
+        if feature == PREDICTION:
+            metrics.set("prediction_psi", latest[col], "PSI da predição no mês mais recente")
+        else:
+            metrics.set(
+                "feature_psi", latest[col], "PSI da feature no mês mais recente", feature=feature
+            )
+    metrics.set("drifted_columns", latest["drifted_columns"], "Colunas em drift no último mês")
+    metrics.set("model_auc", latest["roc_auc"], "AUC do modelo no mês mais recente")
+    metrics.set(
+        "model_health_status", STATUS_CODES[latest["status"]],
+        "Saúde do modelo no último mês: 0 = ok, 1 = data drift, 2 = degradado",
+    )
+    metrics.set(
+        "drift_last_evaluated_month_timestamp_seconds",
+        pd.Period(latest["month"], "M").to_timestamp().timestamp(),
+        "Mês de referência da última avaliação de drift",
+    )
+
+
 def detect(cfg: dict[str, Any], save_html: bool = True) -> pd.DataFrame:
     """Compara referência e produção mês a mês e consolida as métricas.
 
@@ -262,7 +334,24 @@ def detect(cfg: dict[str, Any], save_html: bool = True) -> pd.DataFrame:
         }
         row["status"] = classify_status(row, drift_cfg)
         rows.append(row)
-        logger.info("%s processado: %s", batch, row["status"])
+        drifted = [
+            k.removeprefix("psi_") for k, v in row.items()
+            if k.startswith("psi_") and v > drift_cfg["psi_critical"]
+        ]
+        level = logging.WARNING if row["status"] != "ok" else logging.INFO
+        logger.log(
+            level,
+            "%s: status %s | AUC %.3f | colunas em drift: %s",
+            batch, row["status"], row["roc_auc"], ", ".join(drifted) or "nenhuma",
+            extra={
+                "event": "drift_evaluated",
+                "batch": batch,
+                "month": row["month"],
+                "status": row["status"],
+                "roc_auc": round(row["roc_auc"], 4),
+                "drifted_features": drifted,
+            },
+        )
 
     summary = pd.DataFrame(rows)
     summary_path = Path(paths["reports"]) / "drift_summary.csv"
@@ -274,7 +363,9 @@ def detect(cfg: dict[str, Any], save_html: bool = True) -> pd.DataFrame:
 def main() -> None:
     """Executa a detecção e exibe a evolução mensal das principais métricas."""
     warnings.filterwarnings("ignore", category=SyntaxWarning)
-    summary = detect(load_config())
+    with track_stage("detect") as metrics:
+        summary = detect(load_config())
+        export_metrics(metrics, summary)
     cols = [
         "month",
         "drifted_columns",
@@ -293,5 +384,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()

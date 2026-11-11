@@ -28,6 +28,8 @@ from typing import Final
 import pandas as pd
 
 from credit_scoring.contracts.schemas import INFERENCE_CONTRACT, contract_report
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import StageMetrics, track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +79,47 @@ def summarize(report: pd.DataFrame, max_examples: int = 3) -> pd.DataFrame:
     )
 
 
-def ingest_batch(path: Path | str, production_dir: Path | str = PRODUCTION_DIR) -> IngestionResult:
+def record_ingestion(
+    metrics: StageMetrics, result: IngestionResult, report: pd.DataFrame
+) -> None:
+    """Registra as métricas de ingestão de um lote.
+
+    Args:
+        metrics: Registro de métricas da etapa em andamento.
+        result: Resultado da ingestão.
+        report: Violações encontradas (vazio se aceito).
+    """
+    batch = Path(result.batch).stem
+    metrics.set(
+        "ingestion_batch_accepted", int(result.accepted),
+        "1 se o lote passou no contrato de dados, 0 se foi bloqueado", batch=batch,
+    )
+    metrics.set("ingestion_batch_rows", result.n_rows, "Linhas recebidas no lote", batch=batch)
+    metrics.set(
+        "ingestion_batch_violations", result.n_violations,
+        "Total de violações do contrato no lote", batch=batch,
+    )
+    if not report.empty:
+        counts = report.groupby(["column", "check"]).size()
+        for (column, check), n in counts.items():
+            metrics.set(
+                "ingestion_contract_violations", int(n),
+                "Violações do contrato por coluna e regra",
+                batch=batch, column=str(column), check=str(check)[:60],
+            )
+
+
+def ingest_batch(
+    path: Path | str,
+    production_dir: Path | str = PRODUCTION_DIR,
+    metrics: StageMetrics | None = None,
+) -> IngestionResult:
     """Valida um lote contra o contrato e o encaminha para aceite ou quarentena.
 
     Args:
         path: Caminho do lote em Parquet.
         production_dir: Diretório base de produção.
+        metrics: Se informado, registra as métricas de ingestão do lote.
 
     Returns:
         `IngestionResult` com a decisão e os caminhos de destino.
@@ -99,8 +136,14 @@ def ingest_batch(path: Path | str, production_dir: Path | str = PRODUCTION_DIR) 
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / path.name
         shutil.move(path, dest)
-        logger.info("Lote %s ACEITO (%d linhas) -> %s", path.name, len(df), dest)
-        return IngestionResult(path.name, True, len(df), 0, dest)
+        logger.info(
+            "Lote %s ACEITO (%d linhas) -> %s", path.name, len(df), dest,
+            extra={"event": "batch_accepted", "batch": path.stem, "rows": len(df)},
+        )
+        result = IngestionResult(path.name, True, len(df), 0, dest)
+        if metrics is not None:
+            record_ingestion(metrics, result, report)
+        return result
 
     dest_dir = production_dir / "quarantine"
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -116,8 +159,18 @@ def ingest_batch(path: Path | str, production_dir: Path | str = PRODUCTION_DIR) 
         INFERENCE_CONTRACT.name,
         dest,
         summarize(report).to_string(index=False),
+        extra={
+            "event": "batch_rejected",
+            "batch": path.stem,
+            "rows": len(df),
+            "violations": len(report),
+            "violated_rules": sorted(set(report["check"].map(str).str[:60])),
+        },
     )
-    return IngestionResult(path.name, False, len(df), len(report), dest, report_path)
+    result = IngestionResult(path.name, False, len(df), len(report), dest, report_path)
+    if metrics is not None:
+        record_ingestion(metrics, result, report)
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,10 +186,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("batch", type=Path, help="Caminho do lote (.parquet)")
     parser.add_argument("--production-dir", type=Path, default=PRODUCTION_DIR)
     args = parser.parse_args(argv)
-    result = ingest_batch(args.batch, args.production_dir)
+    with track_stage("ingest") as metrics:
+        result = ingest_batch(args.batch, args.production_dir, metrics)
     return 0 if result.accepted else 1
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     sys.exit(main())

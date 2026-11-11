@@ -54,6 +54,8 @@ import pandas as pd
 from credit_scoring.config import load_config
 from credit_scoring.data.ingest import ingest_batch
 from credit_scoring.data.load import ID_COLUMN, TARGET
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import StageMetrics, track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -253,11 +255,12 @@ def generate_batch(
     return batch, manifest
 
 
-def simulate(cfg: dict[str, Any]) -> list[BatchManifest]:
+def simulate(cfg: dict[str, Any], metrics: StageMetrics | None = None) -> list[BatchManifest]:
     """Gera todos os lotes, ingere-os pelo contrato e salva rótulos e manifesto.
 
     Args:
         cfg: Configurações do projeto.
+        metrics: Se informado, registra as métricas de ingestão de cada lote.
 
     Returns:
         Manifestos de todos os lotes.
@@ -283,7 +286,7 @@ def simulate(cfg: dict[str, Any]) -> list[BatchManifest]:
         batch.drop(columns=TARGET).to_parquet(path, index=False)
         batch[[ID_COLUMN, TARGET]].to_parquet(labels_dir / path.name, index=False)
 
-        if not ingest_batch(path, prod).accepted:
+        if not ingest_batch(path, prod, metrics).accepted:
             raise RuntimeError(f"Lote simulado {path.name} violou o contrato de dados")
         manifests.append(manifest)
 
@@ -300,7 +303,8 @@ def simulate(cfg: dict[str, Any]) -> list[BatchManifest]:
 
 def main() -> None:
     """Executa a simulação conforme `configs/config.yaml` e exibe o resumo."""
-    manifests = simulate(load_config())
+    with track_stage("simulate") as metrics:
+        manifests = simulate(load_config(), metrics)
     logger.info("%-15s %-8s %6s %8s %9s %8s %7s", "lote", "mês", "data", "concept",
                 "inflação", "default", "flips")
     for m in manifests:
@@ -317,5 +321,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()

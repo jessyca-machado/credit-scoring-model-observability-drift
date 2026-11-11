@@ -21,6 +21,8 @@ import pandas as pd
 
 from credit_scoring.data.ingest import IngestionResult, ingest_batch
 from credit_scoring.data.load import ID_COLUMN, TARGET
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import StageMetrics, track_stage
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +84,11 @@ def corrupt(batch: pd.DataFrame) -> pd.DataFrame:
     return bad
 
 
-def run() -> list[IngestionResult]:
+def run(metrics: StageMetrics | None = None) -> list[IngestionResult]:
     """Gera os dois lotes e executa a ingestão de ambos.
+
+    Args:
+        metrics: Se informado, registra as métricas de ingestão dos lotes.
 
     Returns:
         Resultados da ingestão do lote limpo e do lote corrompido.
@@ -99,12 +104,14 @@ def run() -> list[IngestionResult]:
     for desc, rule in INJECTED_ERRORS:
         logger.info("  - %-50s -> %s", desc, rule)
 
-    return [ingest_batch(ok_path), ingest_batch(bad_path)]
+    return [ingest_batch(ok_path, metrics=metrics), ingest_batch(bad_path, metrics=metrics)]
 
 
 def main() -> None:
     """Executa a demonstração e exibe o resultado final."""
-    for r in run():
+    with track_stage("contract_demo") as metrics:
+        results = run(metrics)
+    for r in results:
         status = "ACEITO   " if r.accepted else "BLOQUEADO"
         logger.info(
             "%s | %-24s | %3d linhas | %2d violações | %s",
@@ -117,5 +124,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()

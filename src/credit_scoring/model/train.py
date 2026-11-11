@@ -40,6 +40,8 @@ from credit_scoring.config import load_config
 from credit_scoring.data.load import TARGET
 from credit_scoring.data.preprocess import CATEGORICAL_FEATURES, FEATURES, NUMERIC_FEATURES
 from credit_scoring.model.evaluate import classification_report, find_best_threshold
+from credit_scoring.observability.logs import setup_logging
+from credit_scoring.observability.metrics import track_stage
 
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
 logger = logging.getLogger(__name__)
@@ -259,8 +261,16 @@ def _log_mlflow(
 
 def main() -> None:
     """Treina o modelo conforme `configs/config.yaml` e exibe as métricas."""
-    metadata = train(load_config())
-    m = metadata["metrics"]
+    with track_stage("train") as stage:
+        metadata = train(load_config())
+        m = metadata["metrics"]
+        stage.set("model_threshold", metadata["threshold"], "Threshold de custo mínimo")
+        for split in ("cv_oof", "test"):
+            for metric in ("auc", "ks", "recall", "expected_cost", "approval_rate"):
+                stage.set(
+                    f"model_training_{metric}", m[split][metric],
+                    f"{metric} no treino (cv_oof) e no holdout (test)", split=split,
+                )
     logger.info("Threshold (custo mínimo): %.2f", metadata["threshold"])
     for split in ("cv_oof", "test"):
         logger.info(
@@ -276,5 +286,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    setup_logging()
     main()
