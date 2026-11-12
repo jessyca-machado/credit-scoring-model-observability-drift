@@ -353,8 +353,6 @@ bem menos, embora `age` não seja feature. Parte da diferença reflete um risco 
 │   ├── reference/          # baseline do treino para comparação de drift
 │   └── production/         # lotes simulados de produção ao longo do tempo
 ├── models/                 # artefatos treinados (não versionados)
-├── notebooks/              # EDA e análise causal exploratória
-├── scripts/                # utilitários e automações
 ├── src/credit_scoring/
 │   ├── data/               # ingestão e pré-processamento
 │   ├── contracts/          # contratos de qualidade de dados (Pandera) - ver docs/governance/data_contract.md
@@ -371,7 +369,7 @@ bem menos, embora `age` não seja feature. Parte da diferença reflete um risco 
 │   ├── governance/         # LGPD, RIPD, base legal, retenção
 │   ├── model_card/         # Model Card e Data Card
 │   └── runbooks/           # observabilidade e resposta a alertas (observability.md)
-├── tests/{unit,integration}/
+├── tests/unit/             # testes unitários
 ├── docker-compose.yml      # api, prometheus, pushgateway, loki, alloy, grafana, mlflow
 ├── Dockerfile
 ├── Makefile
