@@ -4,26 +4,46 @@ Este documento descreve como o projeto dá visibilidade operacional ao pipeline 
 
 ## Arquitetura
 
+```mermaid
+flowchart LR
+    subgraph FONTES["Fontes de telemetria"]
+        direction TB
+        BATCH["Etapas batch<br/>download · preprocess · train · simulate<br/>ingest · predict · detect · contract_demo<br/><i>track_stage()</i>"]
+        API["API FastAPI :8000<br/>/predict · /health · /metrics"]
+    end
+
+    subgraph METRICAS["Métricas"]
+        direction TB
+        PGW["Pushgateway :9091"]
+        PROM["Prometheus :9090<br/>+ regras de alerta"]
+    end
+
+    subgraph LOGS["Logs"]
+        direction TB
+        PJ[("logs/pipeline.jsonl")]
+        AJ[("logs/api.jsonl")]
+        ALL["Grafana Alloy :12345"]
+        LOKI["Loki :3100"]
+    end
+
+    GRAF["Grafana :3000<br/>dashboard do projeto"]
+
+    BATCH -- "pushadd" --> PGW
+    PGW -- scrape --> PROM
+    API -- "scrape /metrics" --> PROM
+    BATCH -- "JSON" --> PJ
+    API -- "JSON" --> AJ
+    PJ & AJ --> ALL
+    ALL -- "labels: job, level,<br/>stage, event" --> LOKI
+    PROM --> GRAF
+    LOKI --> GRAF
+    PROM -. "auto-scrape: up, memória" .-> ALL & LOKI & GRAF
 ```
- Etapas batch do pipeline                      Modelo em produção
- (download, preprocess, train, simulate,       API FastAPI :8000
-  ingest, predict, detect, contract_demo)      /predict  /health  /metrics
-        │                    │                     │            │
-        │ métricas           │ logs JSON           │ scrape     │ logs JSON
-        ▼                    ▼                     │            ▼
-  Pushgateway :9091    logs/pipeline.jsonl         │      logs/api.jsonl
-        │                    │                     │            │
-        │ scrape             └──────────┬──────────┼────────────┘
-        ▼                               ▼          │
-  Prometheus :9090 ◄────────────────────┼──────────┘
-   + regras de alerta              Grafana Alloy :12345
-        │                               │
-        │                               ▼
-        │                          Loki :3100
-        │                               │
-        └──────────────► Grafana :3000 ◄┘
-                 "Credit Scoring - Observabilidade de Pipelines e Modelos"
-```
+
+Dois caminhos independentes chegam ao mesmo dashboard:
+
+- **Métricas.** As etapas batch terminam antes de um scrape, então empurram (`pushadd`) para o Pushgateway; a API expõe `/metrics` e é coletada direto. O Prometheus avalia os [alertas](#alertas-e-resposta) sobre essas séries.
+- **Logs.** Tudo é gravado em JSON em `logs/`; o Alloy lê os arquivos, extrai os labels e envia ao Loki. O `run_id` correlaciona logs e métricas de uma mesma execução.
 
 | Componente | Papel | Código / configuração |
 |---|---|---|

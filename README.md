@@ -1,5 +1,118 @@
 # credit-scoring-model-observability-drift
-Quarto tech challenge para o curso pós-tech da FIAP de machine learning engineering - construção de um modelo de classificação simples, com contratos de qualidade de dados, simulação de um cenário de degradação (Data Drift e Concept Drift), uso de ferramentas de observabilidade e doc sob as regras de governança e privacidade (LGPD).
+
+Quarto tech challenge da pós-tech FIAP em Machine Learning Engineering. O projeto constrói um modelo de classificação de risco de crédito e cuida de tudo o que vem depois do treino: contratos de qualidade de dados, simulação de degradação em produção (Data Drift e Concept Drift), detecção de drift, observabilidade de pipeline e modelo, e governança sob a LGPD.
+
+## Contexto
+
+Uma fintech usa um modelo para decidir se aprova ou recusa pedidos de crédito. O modelo foi
+treinado com dados de um período estável. Ao longo de 2025 o cenário muda: a **inflação** eleva
+valores e prazos dos empréstimos, a empresa capta um **novo perfil de cliente** e, depois, perfis
+antes considerados seguros (clientes sem conta corrente e clientes com crédito em outras
+instituições) passam a **inadimplir mais**. O modelo continua respondendo, mas as decisões pioram
+em silêncio.
+
+O objetivo é mostrar como um time de ML percebe e reage a isso:
+
+| Pergunta | Como o projeto responde |
+| --- | --- |
+| O dado que chega é válido? | Contrato de dados (Pandera) na ingestão e na API. Lote inválido vai para quarentena; requisição inválida recebe 422 |
+| O modelo é bom e decide pelo custo certo? | XGBoost com threshold que minimiza o custo esperado (aprovar um mau pagador custa 5x mais que recusar um bom) |
+| A população mudou? (Data Drift) | PSI por feature e da PD prevista, mês a mês, com Evidently |
+| O modelo ainda acerta? (Concept Drift) | AUC, KS e custo esperado com rótulos tardios, mês a mês |
+| Alguém fica sabendo? | Logs JSON (Loki), métricas (Prometheus/Pushgateway), dashboard (Grafana) e alertas |
+| O tratamento de dados é lícito e justo? | Base legal, minimização, retenção e auditoria de viés ([LGPD](#proteção-de-dados-e-governança-lgpd)) |
+
+### Resultados
+
+**Modelo** (XGBoost, threshold de PD = 0,11, versão atual em `models/metadata.json`):
+
+| Conjunto | AUC | KS | Recall (maus) | Aprovação | Custo esperado |
+| --- | --- | --- | --- | --- | --- |
+| Validação cruzada (out-of-fold) | 0,80 | 0,47 | 91% | 37% | 0,49 |
+| Teste (holdout, n = 200) | 0,80 | 0,55 | 88% | 34% | 0,57 |
+
+O threshold baixo é intencional: com custo 5:1, o modelo prefere recusar na dúvida, e a aprovação
+fica perto de 35%.
+
+**Produção simulada** (`make detect`, 12 lotes de ~300 solicitações):
+
+| Período | O que muda | Default real | AUC | Aprovação | Status |
+| --- | --- | --- | --- | --- | --- |
+| jan–mar | nada (mesma distribuição do treino) | 31–34% | 0,78–0,82 | 32% | `ok` |
+| abr–jul | data drift: inflação, prazos maiores, novo perfil de cliente | 31–39% | 0,76–0,83 | 25–32% | `data_drift` em jun e jul |
+| ago–dez | + concept drift: perfis "seguros" passam a inadimplir | 38–52% | 0,80 → **0,68** | 25% → 17% | `degraded` em nov e dez |
+
+O data drift sozinho quase não afeta a AUC: o modelo continua ordenando bem os clientes. O concept
+drift é o que derruba o desempenho abaixo do mínimo de 0,70 e dispara o alerta
+`ModelPerformanceDegraded`. O gabarito do que foi alterado em cada lote fica em
+`data/production/simulation_manifest.json`.
+
+### Arquitetura
+
+```mermaid
+flowchart LR
+    subgraph TREINO["1 · Treino (offline)"]
+        direction TB
+        UCI[("UCI German Credit")] --> DL["download<br/>SHA-256"]
+        DL --> PRE["preprocess<br/>✔ contrato Pandera"]
+        PRE --> REF[("data/reference<br/>baseline")]
+        PRE --> TR["train<br/>XGBoost + threshold por custo"]
+        TR --> MOD[("models/<br/>model.joblib + metadata")]
+        TR -.-> MLF["MLflow<br/>experimentos"]
+    end
+
+    subgraph BATCH["2 · Produção batch (mensal)"]
+        direction TB
+        SIM["simulate<br/>data + concept drift"] --> INC[("incoming/")]
+        INC --> ING{"ingest<br/>✔ contrato"}
+        ING -- válido --> ACC[("accepted/")]
+        ING -- inválido --> QUA[("quarantine/")]
+        ACC --> PRED["predict<br/>PD, score, decisão"]
+        SIM -. rótulos tardios .-> LAB[("labels/")]
+        PRED --> DET["detect · Evidently<br/>PSI + AUC/KS/custo"]
+        LAB --> DET
+        DET --> REP[("reports/<br/>HTML + drift_summary")]
+    end
+
+    subgraph ONLINE["3 · Serving (online)"]
+        direction TB
+        CLI(["cliente / make traffic"]) --> API["API FastAPI<br/>POST /predict<br/>✔ contrato → 422"]
+    end
+
+    subgraph OBS["4 · Observabilidade"]
+        direction TB
+        PGW["Pushgateway"] --> PROM["Prometheus<br/>alertas"]
+        ALL["Alloy"] --> LOKI["Loki"]
+        PROM --> GRAF["Grafana<br/>dashboard"]
+        LOKI --> GRAF
+    end
+
+    MOD --> PRED
+    MOD --> API
+    MOD --> DET
+    REF --> DET
+
+    ING & PRED & DET -. métricas .-> PGW
+    ING & PRED & DET -. logs JSON .-> ALL
+    API -. /metrics .-> PROM
+    API -. logs JSON .-> ALL
+```
+
+| Bloco | O que faz | Onde |
+| --- | --- | --- |
+| 1 · Treino | Baixa e valida os dados, gera o baseline de drift e treina o modelo com threshold que minimiza o custo 5:1 | `src/credit_scoring/data`, `model` |
+| 2 · Produção batch | Valida cada lote no contrato, gera decisões e, com os rótulos tardios, mede data drift (PSI) e concept drift (AUC, KS, custo) | `data/ingest.py`, `model/predict.py`, `drift/` |
+| 3 · Serving | Score em tempo real com o mesmo modelo e o mesmo contrato de dados | `serving/app.py` |
+| 4 · Observabilidade | Métricas e logs de todas as etapas convergem no Grafana; o Prometheus avalia os alertas | `observability/`, `monitoring/` |
+
+Detalhes de métricas, logs, alertas e resposta a incidentes estão no
+[runbook de observabilidade](docs/runbooks/observability.md). As regras do contrato de dados estão
+em [data_contract.md](docs/governance/data_contract.md).
+
+### Stack
+
+Python 3.12 · uv · pandas · scikit-learn · XGBoost · Pandera · Evidently · MLflow · FastAPI ·
+Prometheus · Pushgateway · Grafana Loki · Grafana Alloy · Grafana · Docker Compose
 
 ## Dataset
 
@@ -12,6 +125,146 @@ Quarto tech challenge para o curso pós-tech da FIAP de machine learning enginee
 > O dataset original define custo assimétrico: classificar um mau pagador como bom custa 5x mais
 > que o erro inverso. Atributos sensíveis (`sex`, `marital_status`, `foreign_worker`, `age`) são
 > usados apenas para auditoria de viés, não como features. Ver [Proteção de dados](#proteção-de-dados-e-governança-lgpd).
+
+## Como rodar localmente
+
+### Pré-requisitos
+
+- [uv](https://docs.astral.sh/uv/) (instala o Python 3.12 e as dependências do `uv.lock`)
+- Docker com Docker Compose (só para a stack de observabilidade)
+- `make`
+- Portas livres: 3000, 3100, 5000, 8000, 9090, 9091, 12345
+
+### Caminho rápido
+
+```bash
+make install         # cria .venv e instala dependências
+make observability   # sobe a stack, roda o pipeline completo e gera tráfego na API
+```
+
+Depois abra:
+
+| Serviço | URL |
+| --- | --- |
+| Dashboard Grafana | http://localhost:3000 (acesso anônimo, abre no dashboard do projeto) |
+| Alertas | http://localhost:9090/alerts |
+| API (Swagger) | http://localhost:8000/docs |
+| MLflow | http://localhost:5000 |
+| Relatórios Evidently | `reports/evidently/*.html` |
+
+> A API carrega `models/model.joblib` na subida. Na primeira execução o modelo ainda não existe
+> quando `make up` roda, então rode `docker compose restart api` depois do `make pipeline` (ou
+> rode `make install pipeline` antes do `make observability`). O mesmo vale depois de um `make train`.
+
+### Passo a passo
+
+Sem Docker, dá para rodar cada etapa isoladamente. As métricas para o Pushgateway são opcionais:
+se ele estiver fora do ar, a etapa registra `metrics_push_failed` e segue.
+
+```bash
+make install        # uv sync - cria .venv e instala dependências do uv.lock
+make data           # baixa o German Credit (UCI) para data/raw
+make preprocess     # trata, valida contra o contrato de dados e gera train/test e reference
+make demo-contract  # demonstra o contrato bloqueando um lote com erros
+make ingest FILE=…  # ingere um lote: aceito ou quarentena (exit 1)
+make train          # treina o XGBoost (busca de hiperparâmetros + threshold por custo) e salva em models/
+make mlflow-ui      # abre o MLflow em http://localhost:5000 para comparar execuções
+make simulate       # gera 12 lotes mensais de produção (jan-dez/2025) com data drift (abr+) e concept drift (ago+)
+make predict        # gera PD, score (0-1000) e decisão para cada lote de produção
+make detect         # Evidently: referência x produção por mês (drift PSI + desempenho) -> reports/
+make pipeline       # roda todas as etapas instrumentadas (logs + métricas) com o mesmo RUN_ID
+make serve          # API local com reload: POST /predict, GET /health, GET /metrics
+make up / down      # sobe/derruba api, prometheus, pushgateway, loki, alloy, grafana e mlflow
+make traffic        # gera tráfego na API a partir dos lotes de produção
+make logs           # acompanha logs/pipeline.jsonl
+make test           # pytest com cobertura
+make lint           # ruff
+```
+
+`make pipeline` só treina se ainda não existir `models/model.joblib`; retreinar é uma decisão
+explícita (`make train`). Os parâmetros da simulação, do modelo e dos limiares de drift ficam em
+[configs/config.yaml](configs/config.yaml).
+
+### Testando a API
+
+```bash
+curl -s http://localhost:8000/health
+
+curl -s -X POST http://localhost:8000/predict -H 'Content-Type: application/json' -d '[{
+  "application_id": "APP-90000001", "duration_months": 24, "credit_amount": 3500,
+  "installment_rate": 3, "residence_since": 2, "existing_credits": 1, "num_dependents": 1,
+  "checking_status": "no checking account", "credit_history": "existing credits paid duly",
+  "purpose": "car (used)", "savings_status": "< 100 DM", "employment_since": "1 <= ... < 4 years",
+  "other_debtors": "none", "property": "car or other", "other_installment_plans": "none",
+  "housing": "own", "job": "skilled employee / official", "own_telephone": "yes",
+  "foreign_worker": "no", "age": 35, "sex": "female", "marital_status": "single"
+}]'
+```
+
+A resposta traz `default_proba`, `score` (0–1000, maior = menor risco), `decision`
+(`approve`/`reject`) e `model_version`. Um valor fora do domínio (ex.: `"purpose": "crypto"`)
+retorna **422** com as violações do contrato e incrementa `api_contract_violations_total`.
+
+## Como rodar em produção
+
+> **Escopo.** O projeto roda hoje em Docker Compose numa única máquina. Esta seção descreve como
+> levá-lo para um ambiente produtivo e o que muda em relação ao ambiente local. Itens ✅ já estão
+> prontos no código; 📋 são necessários antes de expor o serviço com dados reais.
+
+### Componentes
+
+| Componente | Em produção | Configuração |
+| --- | --- | --- |
+| API de scoring | Imagem do [Dockerfile](Dockerfile) (`uvicorn` na porta 8000), atrás de um load balancer, com healthcheck em `GET /health` | `MODELS_DIR`, `LOG_DIR` |
+| Artefato do modelo | `model.joblib` + `metadata.json` montados em `MODELS_DIR` (volume, bucket sincronizado ou imagem versionada por modelo) | gerados por `make train` |
+| Etapas batch (ingest, predict, detect) | Jobs agendados (cron, Airflow, Kubernetes CronJob) usando a mesma imagem: `python -m credit_scoring.<módulo>` | `RUN_ID`, `PUSHGATEWAY_URL`, `LOG_DIR` |
+| Prometheus + Pushgateway | Coletam a API e as etapas batch; avaliam [alerts.yml](monitoring/prometheus/alerts.yml) | [monitoring/prometheus/](monitoring/prometheus/) |
+| Loki + Alloy | Alloy lê `LOG_DIR/*.jsonl` de cada host e envia ao Loki | [config.alloy](monitoring/alloy/config.alloy) |
+| Grafana | Datasources e dashboard provisionados como código | [monitoring/grafana/](monitoring/grafana/) |
+| MLflow | Servidor com backend em banco (PostgreSQL) e artefatos em object storage | `mlflow.tracking_uri` |
+
+Variáveis de ambiente:
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `MODELS_DIR` | `models` | Diretório com `model.joblib` e `metadata.json` carregados na subida da API |
+| `LOG_DIR` | `logs` | Onde os logs JSON (`pipeline.jsonl`, `api.jsonl`) são gravados para o Alloy |
+| `PUSHGATEWAY_URL` | `localhost:9091` | Destino das métricas das etapas batch |
+| `RUN_ID` | gerado | Correlaciona logs e métricas de uma mesma execução do pipeline |
+
+### Deploy da API
+
+```bash
+# 1. treinar e validar o modelo (fora do caminho crítico)
+make train && make test
+
+# 2. construir e publicar a imagem
+docker build -t <registry>/credit-scoring-api:<versão> .
+docker push <registry>/credit-scoring-api:<versão>
+
+# 3. rodar com o modelo montado (somente leitura) e logs num volume coletado pelo Alloy
+docker run -d -p 8000:8000 \
+  -e MODELS_DIR=/app/models -e LOG_DIR=/app/logs \
+  -v /srv/credit-scoring/models:/app/models:ro \
+  -v /srv/credit-scoring/logs:/app/logs \
+  <registry>/credit-scoring-api:<versão>
+
+# 4. conferir a versão carregada
+curl -s http://<host>:8000/health
+```
+
+A API carrega o modelo uma vez, na subida. **Trocar de modelo = reiniciar a API** com o novo
+artefato em `MODELS_DIR`; a métrica `model_info{version, threshold}` confirma a troca no Grafana.
+
+### Ciclo de operação
+
+1. **Diariamente / a cada lote:** `ingest` valida o lote no contrato (inválido vai para quarentena e
+   dispara `IngestionBatchRejected`) e `predict` grava as decisões com versão e threshold.
+2. **Mensalmente, com rótulos tardios:** `detect` calcula PSI e desempenho por lote. O alerta
+   `DriftDetectionStale` dispara se essa etapa ficar mais de 35 dias sem sucesso.
+3. **Quando um alerta de drift ou desempenho disparar:** seguir o
+   [runbook](docs/runbooks/observability.md#alertas-e-resposta). Retreino com dados recentes passa
+   por `make train`, comparação no MLflow e aprovação antes de substituir o artefato.
 
 ## Proteção de dados e governança (LGPD)
 
@@ -107,7 +360,7 @@ bem menos, embora `age` não seja feature. Parte da diferença reflete um risco 
 │   ├── contracts/          # contratos de qualidade de dados (Pandera) - ver docs/governance/data_contract.md
 │   ├── model/              # treino, avaliação e registro (MLflow)
 │   ├── drift/              # simulação e detecção de Data/Concept Drift
-│   ├── causal/             # análise causal (DAG + DoWhy)
+│   ├── causal/             # análise causal (DAG + DoWhy) - 📋 em construção
 │   ├── observability/      # logs JSON (Loki) e métricas das etapas (Pushgateway)
 │   └── serving/            # API FastAPI + endpoint /metrics (Prometheus)
 ├── monitoring/
@@ -123,25 +376,4 @@ bem menos, embora `age` não seja feature. Parte da diferença reflete um risco 
 ├── Dockerfile
 ├── Makefile
 └── pyproject.toml
-```
-
-## Como rodar
-
-```bash
-make install    # uv sync - cria .venv e instala dependências do uv.lock
-make data       # baixa o German Credit (UCI) para data/raw
-make preprocess # trata, valida contra o contrato de dados e gera train/test e reference
-make demo-contract  # demonstra o contrato bloqueando um lote com erros
-make ingest FILE=… # ingere um lote: aceito ou quarentena (exit 1)
-make train      # treina o XGBoost (busca de hiperparâmetros + threshold por custo) e salva em models/
-make mlflow-ui  # abre o MLflow em http://localhost:5000 para comparar execuções
-make simulate   # gera 12 lotes mensais de produção (jan-dez/2025) com data drift (abr+) e concept drift (ago+)
-make predict    # gera PD, score (0-1000) e decisão para cada lote de produção
-make detect     # Evidently: referência x produção por mês (drift PSI + desempenho) -> reports/
-make pipeline   # roda todas as etapas instrumentadas (logs + métricas) com o mesmo RUN_ID
-make serve      # API local: POST /predict, GET /health, GET /metrics
-make up         # sobe api (8000), prometheus (9090), pushgateway (9091), loki, alloy, grafana (3000) e mlflow (5000)
-make traffic    # gera tráfego na API a partir dos lotes de produção
-make observability  # up + pipeline + traffic; dashboard em http://localhost:3000
-make test
 ```
