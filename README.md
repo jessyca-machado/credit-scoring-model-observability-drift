@@ -22,6 +22,12 @@ O objetivo é mostrar como um time de ML percebe e reage a isso:
 | Alguém fica sabendo? | Logs JSON (Loki), métricas (Prometheus/Pushgateway), dashboard (Grafana) e alertas |
 | O tratamento de dados é lícito e justo? | Base legal, minimização, retenção e auditoria de viés ([LGPD](#proteção-de-dados-e-governança-lgpd)) |
 
+Video STAR: https://youtu.be/-0S_6Vd2DZI
+
+Arquivo do vídeo no repositório: [star_video_credit_scoring.mp4](docs/star_video_credit_scoring.mp4)
+
+Dados da entrega: [link_entrega.txt](link_entrega.txt)
+
 ### Resultados
 
 **Modelo** (XGBoost, threshold de PD = 0,11, versão atual em `models/metadata.json`):

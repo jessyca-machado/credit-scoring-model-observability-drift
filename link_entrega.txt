@@ -1,0 +1,1 @@
+O repositorio do tech challenge 4 esta disponivel no link: https://github.com/jessyca-machado/credit-scoring-model-observability-drift
